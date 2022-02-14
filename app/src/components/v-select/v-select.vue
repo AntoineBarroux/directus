@@ -15,13 +15,14 @@
 			<slot v-else name="preview">
 				<v-input
 					:full-width="fullWidth"
-					readonly
 					:model-value="displayValue"
-					clickable
 					:placeholder="placeholder"
 					:disabled="disabled"
 					:active="active"
 					@click="toggle"
+					@update:model-value="onInput"
+					@focus="$event.target.select()"
+					@blur="emptyFieldIfNeeded"
 				>
 					<template v-if="$slots.prepend" #prepend><slot name="prepend" /></template>
 					<template #append>
@@ -117,14 +118,14 @@
 </template>
 
 <script lang="ts">
-import { useI18n } from 'vue-i18n';
-import { defineComponent, PropType, computed, toRefs, Ref } from 'vue';
 import { useCustomSelection, useCustomSelectionMultiple } from '@/composables/use-custom-selection';
+import { Placement } from '@popperjs/core';
 import { get } from 'lodash';
+import { computed, defineComponent, PropType, Ref, ref, toRefs } from 'vue';
+import { useI18n } from 'vue-i18n';
 import SelectListItemGroup from './select-list-item-group.vue';
 import SelectListItem from './select-list-item.vue';
 import { Option } from './types';
-import { Placement } from '@popperjs/core';
 
 type ItemsRaw = (string | any)[];
 type InputValue = string[] | string;
@@ -217,9 +218,11 @@ export default defineComponent({
 	setup(props, { emit }) {
 		const { t } = useI18n();
 
-		const { internalItems } = useItems();
+		const { items, modelValue } = toRefs(props);
+		const initialValue = ref(modelValue.value);
+		let filteredItems = ref([...items.value]);
+		let { internalItems } = useItems();
 		const { displayValue } = useDisplayValue();
-		const { modelValue } = toRefs(props);
 		const { otherValue, usesOtherValue } = useCustomSelection(modelValue as Ref<string>, internalItems, (value) =>
 			emit('update:modelValue', value)
 		);
@@ -228,6 +231,30 @@ export default defineComponent({
 			internalItems,
 			(value) => emit('update:modelValue', value)
 		);
+
+		const onInput = (value: string) => {
+			emit('update:modelValue', value);
+			fetchResults(value);
+		};
+
+		const fetchResults = async (value: string | null) => {
+			if (!value) {
+				filteredItems.value = props.items;
+			} else {
+				const regex = new RegExp(`\\w*${value}\\w*`, 'i');
+				filteredItems.value = props.items.filter((item) => item.text.match(regex));
+			}
+		};
+
+		const emptyFieldIfNeeded = () => {
+			const possibleChoicesContainCurrentSelection = props.items
+				.map((item) => item[props.itemValue])
+				.find((key) => key === props.modelValue);
+			if (!possibleChoicesContainCurrentSelection) {
+				emit('update:modelValue', initialValue);
+				fetchResults(null);
+			}
+		};
 
 		return {
 			t,
@@ -238,6 +265,9 @@ export default defineComponent({
 			otherValues,
 			addOtherValue,
 			setOtherValue,
+			onInput,
+			filteredItems,
+			emptyFieldIfNeeded,
 		};
 
 		function useItems() {
@@ -264,7 +294,7 @@ export default defineComponent({
 					};
 				};
 
-				const items = props.items.map(parseItem);
+				const items = filteredItems.value.map(parseItem);
 
 				return items;
 			});
